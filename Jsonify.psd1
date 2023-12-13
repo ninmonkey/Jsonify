@@ -73,6 +73,11 @@ FunctionsToExport = @(
     'Jsonify.*'
     # 'Js.*'
     # 'Jq.*'
+    'AutoJson.*'
+    'AutoJsonify.*'
+    'aj.*'
+    'Jsonify.*',
+    'Json.*'
 )
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -80,6 +85,11 @@ CmdletsToExport = @(
     'Jsonify.*'
     # 'Js.*'
     # 'Jq.*'
+    'AutoJson.*'
+    'AutoJsonify.*'
+    'aj.*'
+    'Jsonify.*',
+    'Json.*'
 )
 
 # Variables to export from this module
@@ -94,6 +104,11 @@ AliasesToExport = @(
     'Jsonify.*'
     # 'Js.*'
     # 'Jq.*'
+    'AutoJson.*'
+    'AutoJsonify.*'
+    'aj.*'
+    'Jsonify.*',
+    'Json.*'
 )
 
 # DSC resources to export from this module
