@@ -4,6 +4,8 @@ using namespace System.Management.Automation.Language
 using namespace System.Management.Automation
 using namespace System.Management
 
+# ModuleConfig
+# ExportCoercionFunctions
 $script:ModuleConfig = @{
     ExportCoercionFunctions = $true
     AlwaysWarnWhenTypeNotFound = $True
@@ -12,6 +14,47 @@ $script:ModuleConfig = @{
 
 if($ModuleConfig.VerboseSettings) {
     $PSDefaultParameterValues['Set-JsonifyDefaultCoerceTemplate:Verbose'] = $true
+}
+
+function Get-JsonifyConfig {
+    <#
+    .SYNOPSIS
+        Read Module level options
+    .LINK
+        Get-JsonifyConfig
+    .LINK
+        Set-JsonifyConfig
+    #>
+    param()
+    $state = $script:ModuleConfig
+    return $state
+}
+function Set-JsonifyConfig {
+    <#
+        Set Module level options
+    .example
+
+        Pwsh🐒 # confirm settings changed by causing a warning
+        > CoerceFrom.AnyType ( ( gi fg:\red ) )
+            WARNING: No automatic type detected RgbColor
+
+        Pwsh🐒
+        > $cfg = Get-JsonifyConfig
+        > $cfg.AlwaysWarnWhenTypeNotFound = $false
+        > Set-JsonifyConfig $cFg
+        > CoerceFrom.AnyType ( ( gi fg:\red ) )
+            # no warning
+    .LINK
+        Get-JsonifyConfig
+    .LINK
+        Set-JsonifyConfig
+    #>
+    param(
+        [Alias('Config')]
+        [hashtable]$newConfig
+    )
+    $state = $script:ModuleConfig
+    $state = $newConfig
 }
 # class SummarizePropertyRecord {
 #     [PSMemberTypes]$MemberType = [PSMemberTypes]::All
@@ -416,6 +459,8 @@ function ConvertTo-Jsonify {
         'AutoJsonify', 'Jsonify', 'aj.Json'
     )]
 
+    [OutputType('Object', ParameterSetName='__AllParameterSets')]
+    [OutputType('System.String', ParameterSetName='outJson')]
     param(
         [Alias('Obj', 'Data', 'InpObj', 'In')]
         [Parameter(Mandatory, Position = 0, ValueFromPipeline)]
@@ -431,6 +476,14 @@ function ConvertTo-Jsonify {
         #[Newtonsoft.Json.StringEscapeHandling]
         [ValidateSet( 'Default', 'EscapeNonAscii', 'EscapeHtml' )]
         ${EscapeHandling})
+
+        # if false, objects that will coerce nicely to json are emitted
+        # letting you operate over objects
+        # if true, invokes json conversion here
+        # Or use the global alias 'ConvertTo-Json' which will directly convert at the end
+        [Parameter(ParameterSetName='OutJson')]
+        [Alias('AsJson')]
+        [switch]$OutJson
 
     begin {
         try {
@@ -450,7 +503,6 @@ function ConvertTo-Jsonify {
             }
             if($PSBoundParameters.ContainsKey('Depth')) {
                 # or always? it depends whether this controls itself, or, sub invokes.
-
                 $newParams['Depth'] = $Depth
             }
 
@@ -469,6 +521,9 @@ function ConvertTo-Jsonify {
         try {
             # write-verbose 'Aj.Json :: Process'
             $new = CoerceFrom.AnyType -InputObject $_
+            if($OutJson) {
+                $new = $new | ConvertTo-Json -Compress:$Compress -Depth:$Depth
+            }
             $steppablePipeline.Process( $new )
         }
         catch {
@@ -527,6 +582,11 @@ Export-ModuleMember -Function @(
 
 # # no validation
 Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileSystemInfo' -TemplateName 'Minfiy'
-Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileSystemInfo' -TemplateName 'Minify'
-Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.DirectoryInfo' -TemplateName 'Minify'
-Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileSystemInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.DirectoryInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'DateTime' -TemplateName 'o'
+# Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileSystemInfo' -TemplateName 'Minify'
+# Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.DirectoryInfo' -TemplateName 'Minify'
+# Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileInfo' -TemplateName 'Minify'
+# Set-JsonifyDefaultCoerceTemplate -TypeName 'System.DateTime' -TemplateName 'o'
