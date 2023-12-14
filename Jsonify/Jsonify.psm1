@@ -6,6 +6,12 @@ using namespace System.Management
 
 $script:ModuleConfig = @{
     ExportCoercionFunctions = $true
+    AlwaysWarnWhenTypeNotFound = $True
+    VerboseSettings = $true
+}
+
+if($ModuleConfig.VerboseSettings) {
+    $PSDefaultParameterValues['Set-JsonifyDefaultCoerceTemplate:Verbose'] = $true
 }
 # class SummarizePropertyRecord {
 #     [PSMemberTypes]$MemberType = [PSMemberTypes]::All
@@ -96,6 +102,122 @@ function CoerceFrom.Datetime {
         return $InputObject.ToString('o')
     }
 }
+[hashtable]$script:DefaultTemplateTypeMapping = @{
+
+}
+
+function Set-JsonifyDefaultTypeTemplate {
+    <#
+    .SYNOPSIS
+        set which templates are default globally, to use automatically
+    .NOTES
+        no validation
+    #>
+    [Alias('Set-JsonifyDefaultCoerceTemplate')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrWhiteSpace()]
+        [string]$TypeName,
+
+        [Alias('Name')][Parameter(Mandatory)]
+        [ValidateNotNullOrWhiteSpace()]
+        [string]$TemplateName
+    )
+    $state = $script:DefaultTemplateTypeMapping
+    $prevState = ''
+
+    $prevState = $state.ContainsKey( $TypeName ) ? $state[ $TypeName ] : 'NeverSet'
+    $state[ $TypeName ] = $TemplateName
+    'SetDefaultTemplateType: Type: {0}, Was: {1}, new: {2}' -f @(
+        $TypeName
+        $prevState
+        $state[ $TypeName ]
+    ) | write-verbose
+}
+function Get-JsonifyDefaultTypeTemplate {
+    <#
+    .SYNOPSIS
+        set which templates are default globally, to use automatically
+    .EXAMPLE
+        Get-JsonifyDefaultCoerceTemplate -All
+        Get-JsonifyDefaultCoerceTemplate -TypeName file
+        Get-JsonifyDefaultCoerceTemplate -TypeName dir, file
+    .NOTES
+        no validation
+    #>
+    [Alias('Get-JsonifyDefaultCoerceTemplate')]
+    [CmdletBinding(DefaultParameterSetName='ByNames')]
+    param(
+        # find exact or regex matches
+        [Parameter(Mandatory, ParameterSetName='ByNames')]
+        [ValidateNotNullOrWhiteSpace()]
+        [string[]]$TypeName,
+
+        [Alias('All', 'List')]
+        [Parameter(ParameterSetName='ListOnly')]
+        [switch]$ListAll,
+
+        # Do I return only key names?
+        [Alias('Keys')]
+        [Parameter(ParameterSetName='ListOnly')]
+        [switch]$KeysOnly
+    )
+    # // todo future: $state should be config instances
+    class JsonifyDefaultTypeConfig {
+        # PSTypeName = 'Jsonify.Config.DefaultTypeTemplate.Record'
+        [string]$TypeName = ''
+        [string]$TemplateName = ''
+    }
+    # // future: $state should be config instances
+    # [JsonifyDefaultTypeConfig]@{
+    #     TypeName = $Key
+    #     TemplateName = $state[ $Key ]
+    # }
+
+    $state = $script:DefaultTemplateTypeMapping
+    # if($ListAll) {
+    #     return $state
+    # }
+
+    $query = @(
+        foreach($Key in $state.Keys.Clone()) {
+            $thisKeyMatchedSomething = $false
+            if($ListAll){
+                $thisKeyMatchedSomething = $true
+                [JsonifyDefaultTypeConfig]@{
+                    TypeName = $Key
+                    TemplateName = $state[ $Key ]
+                }
+                continue
+            }
+            foreach($Name in $TypeName) {
+                # if($thisKeyMatchedSomething) { break }
+                if($Key -match $Name) {
+                    $thisKeyMatchedSomething = $true
+                    [JsonifyDefaultTypeConfig]@{
+                        TypeName = $Key
+                        TemplateName = $state[ $Key ]
+                    }
+                    # [pscustomobject]@{
+                    #     PSTypeName = 'Jsonify.Config.DefaultTypeTemplate.Record'
+                    #     TypeName = $Key
+                    #     TemplateName = $state[ $Key ]
+                    # }
+                    # $thisKeyMatchedSomething = $true
+                    break
+                }
+            }
+        # $state.Keys
+    })
+    $query = $query | sort-Object -Unique TypeName, TemplateName
+    if($KeysOnly) {
+        return $query.TypeName
+    }
+    return $query
+
+}
+
 
 function CoerceFrom.FileSystemInfo {
     [Alias('CoerceFrom.File')]
@@ -149,12 +271,12 @@ function CoerceFrom.FileSystemInfo {
             $meta.FullName            = $Obj.FullName.ToString()
             $meta.PSPath              = $Obj.PSPath.ToString()
             $meta.Length              = $Obj.Length
-            $meta.CreationTime        = AutoJsonify.From.Datetime $Obj.CreationTime
-            $meta.CreationTimeUtc     = AutoJsonify.From.Datetime $Obj.CreationTimeUtc
-            $meta.LastWriteTime       = AutoJsonify.From.Datetime $Obj.LastWriteTime
-            $meta.LastWriteTimeUtc    = AutoJsonify.From.Datetime $Obj.LastWriteTimeUtc
-            $meta.LastAccessTime      = AutoJsonify.From.Datetime $Obj.LastWriteTime
-            $meta.LastAccessTimeUtc   = AutoJsonify.From.Datetime $Obj.LastWriteTimeUtc
+            $meta.CreationTime        = CoerceFrom.Datetime $Obj.CreationTime
+            $meta.CreationTimeUtc     = CoerceFrom.Datetime $Obj.CreationTimeUtc
+            $meta.LastWriteTime       = CoerceFrom.Datetime $Obj.LastWriteTime
+            $meta.LastWriteTimeUtc    = CoerceFrom.Datetime $Obj.LastWriteTimeUtc
+            $meta.LastAccessTime      = CoerceFrom.Datetime $Obj.LastWriteTime
+            $meta.LastAccessTimeUtc   = CoerceFrom.Datetime $Obj.LastWriteTimeUtc
             $meta.Attributes          = [string]$Obj.Attributes
             $meta.Exists              = [string]$Obj.Exists
             $meta.Extension           = [string]$Obj.Extension
@@ -229,23 +351,47 @@ function CoerceFrom.FileSystemInfo {
     [pscustomobject]$meta
 }
 
-function Jsonify.CoerceType {
+function CoerceFrom.AnyType {
     <#
     .SYNOPSIS
         Delegate to custom type handlers
     #>
+    [CmdletBinding()]
     [OutputType('System.String')]
-    [Alias('CoerceFrom.Any')]
+    [Alias('CoerceFrom.Any', 'CoerceFrom.Object')]
     param(
         [object]$InputObject
     )
+    $tinfo = $InputObject.GetType()
+    $longName = $tinfo.Namespace, $tinfo.Name -join '.' #-replace '^System\.', ''
+    # $longName = $tinfo.Namespace, $tinfo.Name -join '.' -replace '^System\.', ''
+    # $fullName# [string]$TypeName = $InputObject.GetType().FullName
+    # $shortName = $Tinfo.Name
+    switch( $longName ) {
+        'System.IO.FileSystemInfo' {
+            $new = CoerceFrom.FileSystemInfo -InputObject $InputObject
+        }
+        'System.DateTime' {
+            $new = CoerceFrom.Datetime -InputObject $InputObject
+        }
+        default {
+            $new = $InputObject
+            'No automatic type detected {0}' -f @( $tinfo.Name )
+                | write-debug
 
-
-    if($_ -is 'IO.FileSystemInfo') {
-        $new = CoerceFrom.FileSystemInfo -InputObject $_
-    } else {
-        $new = $new
+            if($ModuleConfig.AlwaysWarnWhenTypeNotFound) {
+                'No automatic type detected {0}' -f @( $tinfo.Name )
+                    | write-warning
+            }
+        }
     }
+    # if($_ -is 'IO.FileSystemInfo') {
+    #     $new = CoerceFrom.FileSystemInfo -InputObject $InputObject
+    # } else {
+
+
+    #     $new = $InputObject
+    # }
     return $new
 }
 
@@ -299,6 +445,15 @@ function ConvertTo-Jsonify {
                 <# commandName: #> $commandName,
                 <# type: #> [CommandTypes]::Cmdlet )
 
+            if($PSBoundParameters.ContainsKey('Compress')) {
+                $newParams['Compress'] = $Compress
+            }
+            if($PSBoundParameters.ContainsKey('Depth')) {
+                # or always? it depends whether this controls itself, or, sub invokes.
+
+                $newParams['Depth'] = $Depth
+            }
+
             $scriptCmd = { & $wrappedCmd @newParams }
 
             $steppablePipeline = $scriptCmd.GetSteppablePipeline(
@@ -313,7 +468,7 @@ function ConvertTo-Jsonify {
     process {
         try {
             # write-verbose 'Aj.Json :: Process'
-            $new = Jsonify.CoerceType -InputObject $_
+            $new = CoerceFrom.AnyType -InputObject $_
             $steppablePipeline.Process( $new )
         }
         catch {
@@ -339,6 +494,13 @@ function ConvertTo-Jsonify {
 }
 
 Export-ModuleMember -Function @(
+    'Get-Jsonify*'
+    'Set-Jsonify*'
+    # 'Get-JsonifyDefaultTypeTemplate'
+    # 'Get-JsonifyDefaultCoerceTemplate'
+    'Set-JsonifyDefaultCoerceTemplate'
+    'Get-JsonifyDefaultTypeTemplate'
+    'Get-JsonifyDefaultCoerceTemplate'
     'ConvertTo-Jsonify'
     'AutoJson.*'
     'AutoJsonify.*'
@@ -350,6 +512,8 @@ Export-ModuleMember -Function @(
         'CoerceFrom.*'
     }
 ) -Alias @(
+    'Get-Jsonify*'
+    'Set-Jsonify*'
     'AutoJson.*'
     'AutoJsonify.*'
     'aj.*'
@@ -359,3 +523,10 @@ Export-ModuleMember -Function @(
         'CoerceFrom.*'
     }
 )
+
+
+# # no validation
+Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileSystemInfo' -TemplateName 'Minfiy'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileSystemInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.DirectoryInfo' -TemplateName 'Minify'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileInfo' -TemplateName 'Minify'
