@@ -30,10 +30,10 @@ CompanyName = 'Jake Bolton'
 Copyright = '2023-2024'
 
 # Description of the functionality provided by this module
-Description = 'Pwsh Module that simplifies automatic conversion to Json without requiring ConvertTo-Json with -Depth. Usually what you wan''t isn''t a depth issue, but a type issue. If types are nested, but are still primitive types, then allow any depth. Can throw or warn if types are large from types'
+Description = 'Pwsh Module that simplifies automatic conversion to Json without requiring ConvertTo-Json and -Depth. Usually what you wan''t isn''t a depth issue, but convertions are verbose for many standard types. that many type defintions are deep.  type issue. If types are nested, but are still primitive types, then allow any depth. Can throw or warn if types are large from types'
 
 # Minimum version of the PowerShell engine required by this module
-# PowerShellVersion = ''
+PowerShellVersion = '7.0'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
@@ -126,13 +126,15 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        # Tags = @()
+        Tags = @(
+            'Pwsh', 'Coercion', 'Conversion', 'Serialization', 'Json', 'UX', 'Interactive'
+        )
 
         # A URL to the license for this module.
-        # LicenseUri = ''
+        LicenseUri = 'https://github.com/ninmonkey/jsonify/LICENSE'
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://github.com/ninmonkey/jsonify'
 
         # A URL to an icon representing this module.
         # IconUri = ''
@@ -142,6 +144,7 @@ PrivateData = @{
 
         # Prerelease string of this module
         # Prerelease = ''
+        # Prerelease = 'SOURCE'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false
