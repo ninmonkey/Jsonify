@@ -40,6 +40,22 @@ Pwsh7🐒
 Pwsh7🐒
 > Set-JsonifyDefaultCoerceTemplate -TypeName 'File' -TemplateName 'Minify'
 > Set-JsonifyDefaultCoerceTemplate -TypeName 'Datetime' -TemplateName 'o'
+
+Pwsh7🐒
+> Set-JsonifyDefaultTypeTemplate -TypeName 'Datetime' 'u'
+> coerceFrom.Datetime (get-date)
+    2023-12-14 11:40:35Z
+
+Pwsh7🐒
+> Set-JsonifyDefaultTypeTemplate -TypeName 'Datetime' 'o'
+> coerceFrom.Datetime (get-date)
+    2023-12-14 11:40:35Z
+
+Pwsh7🐒
+> Set-JsonifyDefaultTypeTemplate -TypeName 'Datetime' 'o'
+> coerceFrom.Datetime (get-date)
+    2023-12-14T11:40:35.9970430-06:00
+
 ```
 
 ### Getting Global Default Templates

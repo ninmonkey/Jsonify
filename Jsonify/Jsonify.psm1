@@ -6,14 +6,59 @@ using namespace System.Management
 
 # ModuleConfig
 # ExportCoercionFunctions
+$script:DefaultTemplateTypeMapping = @{}
 $script:ModuleConfig = @{
     ExportCoercionFunctions = $true
+    ExportDebugFunctions = $true
     AlwaysWarnWhenTypeNotFound = $True
     VerboseSettings = $true
 }
 
 if($ModuleConfig.VerboseSettings) {
     $PSDefaultParameterValues['Set-JsonifyDefaultCoerceTemplate:Verbose'] = $true
+}
+
+function Get-JsonifyDateTimeFormatString {
+    <#
+    .SYNOPSIS
+        Quickly get and preview named date format string patterns, for a specific culture, else the system's current culture.
+    .EXAMPLE
+        Get-JsonifyDateTimeFormatString
+    .EXAMPLE
+        Get-JsonifyDateTimeFormatString -CultureName 'en-GB'|fl
+    #>
+    param(
+        [ArgumentCompletions('en-US', 'en-GB', 'de-DE', 'es-ES')]
+        [string]$CultureName
+    )
+    if( -not $CultureName ) {
+        $Cult = Get-Culture
+    } else {
+        $Cult = Get-Culture $CultureName -ea 'stop'
+    }
+    # [System.DateTimeOffset]::Now.ToString( $cult.DateTimeFormat.LongDatePattern )
+
+    $Cult.DateTimeFormat.psobject.properties.Where{$_.Name -match 'Pattern'} | Sort-Object Name | %{
+        $Name = $_.Name
+        $fStr = $_.Value
+        $Ex_dt = try {
+            [Datetime]::Now.ToString( $fStr, $Cult )
+        } catch {
+            "Failed: $_"
+        }
+        $Ex_dto = try {
+            [DateTimeOffset]::Now.ToString( $fStr, $Cult )
+        } catch {
+            "Failed: $_"
+        }
+        [pscustomobject]@{
+            PSTypeName = 'Jsonify.Named.DateTimeFormat.Patterns'
+            Name = $Name
+            FormatStr = $fStr
+            Datetime = $Ex_dt
+            DateTimeOffset = $ex_dto
+        }
+    }
 }
 
 function Get-JsonifyConfig {
@@ -121,33 +166,36 @@ function WarnIf.NotType {
         [object]$InputObject,
 
         [Parameter(Mandatory)]
-        [string]$TypeName
+        [string[]]$TypeName
     )
-    if(-not( $InputObject -is $TypeName)) {
-        'Jsonify: WarnIfNotType: expected {0} but found {1}' -f @(
-            $TypeName
-            $InputObject.GetType().Name
-        ) | write-warning
+    $state = $script:ModuleConfig
+    if( -not $state.AlwaysWarnWhenTypeNotFound ) { return }
+
+
+    $matchAny = $false
+    $tinfo = $InputObject.GetType()
+    # todo: refactor and combine the 'is type equial-ish-to-type-name' used in the other functions too
+    foreach($curType in @( $TypeName) ) {
+        # sometimes type instances are instantiable, but this will break. use strings instead.
+        # $directTypeInstance? = $curType -as 'type'
+        # if( $directTypeInstance? ) {
+        #     if( $InputObject -is $DirectTypeIstance?) { $matchAny = $true }
+        # }
+
+        if($InputObject -is 'string' -and ($InputObject -eq $curType)) { $matchAny = $true }
+        if($InputObject -eq $curType) { $matchAny = $true }
+        # if($InputObject -is ($curType -as 'type') ) { $matchAny = $true }
+        if($tinfo.Name -eq $curType) { $matchAny = $true }
+        # if($InputObject.)
     }
+    if($MatchAny) { return }
+    'Jsonify: WarnIfNotType: expected {0} but found {1}' -f @(
+        $typeName -join ', '
+        $InputObject.GetType().Name
+    ) | write-warning
 }
 
-function CoerceFrom.Datetime {
-    [OutputType('System.string')]
-    param(
-        [Parameter(mandatory, ValueFromPipeline)]
-        [object]$InputObject,
-        [Alias('IgnoreProp', 'DropProperty', 'Drop')]
-        [string[]]$ExcludeProperty = @()
-    )
-    process {
-        WarnIf.NotType $InputObject -type 'datetime'
 
-        return $InputObject.ToString('o')
-    }
-}
-[hashtable]$script:DefaultTemplateTypeMapping = @{
-
-}
 
 function Set-JsonifyDefaultTypeTemplate {
     <#
@@ -161,31 +209,63 @@ function Set-JsonifyDefaultTypeTemplate {
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrWhiteSpace()]
-        [string]$TypeName,
+        [string[]]$TypeName,
 
         [Alias('Name')][Parameter(Mandatory)]
         [ValidateNotNullOrWhiteSpace()]
         [string]$TemplateName
     )
     $state = $script:DefaultTemplateTypeMapping
-    $prevState = ''
 
-    $prevState = $state.ContainsKey( $TypeName ) ? $state[ $TypeName ] : 'NeverSet'
-    $state[ $TypeName ] = $TemplateName
-    'SetDefaultTemplateType: Type: {0}, Was: {1}, new: {2}' -f @(
-        $TypeName
-        $prevState
-        $state[ $TypeName ]
-    ) | write-verbose
+    foreach($curTypeName in @($TypeName) ) {
+        $prevState =
+            $state.ContainsKey( $curTypeName ) ?
+            $state[ $curTypeName ] : 'NeverSet'
+
+        $state[ $curTypeName ] = $TemplateName
+
+        'SetDefaultTemplateType: Type: {0}, Was: {1}, new: {2}' -f @(
+                $curTypeName
+                $prevState
+            $state[ $curTypeName ]
+        ) | write-verbose
+    }
+}
+
+function __Get-FirstTemplateName {
+    # __Get-DefaultTemplateName
+    <#
+    .synopsis
+        Returns at most, one match. Should this be cached or fast testing relative commandlet? or is that overkill
+    .NOTES
+
+    #>
+    [OutputType('System.String')]
+    param(
+        [string]$TypeName,
+        [switch]$UsingWildcard
+        # should compares be equal to, or like, skipping regex match?
+        # [switch]$TypeAsLiteral
+
+    )
+    # if missing, emit nothing, or false?
+    return @(Get-JsonifyDefaultCoerceTemplate -TypeName $TypeName -UsingWildcard:$UsingWildcard).Where({$_},'first').TemplateName
 }
 function Get-JsonifyDefaultTypeTemplate {
     <#
     .SYNOPSIS
         set which templates are default globally, to use automatically
+    .notes
+        Exact matches are returned first, regardless of match mode
     .EXAMPLE
         Get-JsonifyDefaultCoerceTemplate -All
+
+        # using regex compare
         Get-JsonifyDefaultCoerceTemplate -TypeName file
         Get-JsonifyDefaultCoerceTemplate -TypeName dir, file
+    .EXAMPLE
+        # -like compare
+        Get-JsonifyDefaultTypeTemplate -TypeName *e -AsWildcard
     .NOTES
         no validation
     #>
@@ -193,7 +273,7 @@ function Get-JsonifyDefaultTypeTemplate {
     [CmdletBinding(DefaultParameterSetName='ByNames')]
     param(
         # find exact or regex matches
-        [Parameter(Mandatory, ParameterSetName='ByNames')]
+        [Parameter(Mandatory, Position=0, ParameterSetName='ByNames')]
         [ValidateNotNullOrWhiteSpace()]
         [string[]]$TypeName,
 
@@ -204,24 +284,38 @@ function Get-JsonifyDefaultTypeTemplate {
         # Do I return only key names?
         [Alias('Keys')]
         [Parameter(ParameterSetName='ListOnly')]
-        [switch]$KeysOnly
+        [switch]$KeysOnly,
+
+        # use -like compares for type names, rather than -match
+        [Alias('Wildcard', 'AsWildcard')]
+        [switch]$UsingWildcard
     )
     # // todo future: $state should be config instances
+    enum JsonifyTypeConfigMatchKind {
+        Exact
+        Wildcard
+        Regex
+        None
+        All
+    }
     class JsonifyDefaultTypeConfig {
         # PSTypeName = 'Jsonify.Config.DefaultTypeTemplate.Record'
         [string]$TypeName = ''
         [string]$TemplateName = ''
+        [string]$MatchKind = 'None' # hidden
+        hidden [bool]$ExactMatch = $false
     }
     # // future: $state should be config instances
     # [JsonifyDefaultTypeConfig]@{
     #     TypeName = $Key
     #     TemplateName = $state[ $Key ]
     # }
-
+    $Conf = @{ AlwaysStripSystemNamespace = $True }
     $state = $script:DefaultTemplateTypeMapping
     # if($ListAll) {
     #     return $state
     # }
+
 
     $query = @(
         foreach($Key in $state.Keys.Clone()) {
@@ -231,16 +325,37 @@ function Get-JsonifyDefaultTypeTemplate {
                 [JsonifyDefaultTypeConfig]@{
                     TypeName = $Key
                     TemplateName = $state[ $Key ]
+                    MatchKind = [JsonifyTypeConfigMatchKind]::All
                 }
                 continue
             }
             foreach($Name in $TypeName) {
+                $curMatchKind = [JsonifyTypeConfigMatchKind]::None
+
+                if($Conf.AlwaysStripSystemNamespace) {
+                    $Name = $Name -replace '^System\.', ''
+                }
+
                 # if($thisKeyMatchedSomething) { break }
-                if($Key -match $Name) {
+                if( $UsingWildcard -and ($key -like $name)) {
                     $thisKeyMatchedSomething = $true
+                    $curMatchKind = [JsonifyTypeConfigMatchKind]::Wildcard
+                }
+                if( ( -not $UsingWildcard) -and ($Key -match $Name)) {
+                    $thisKeyMatchedSomething = $true
+                    $curMatchKind = [JsonifyTypeConfigMatchKind]::Regex
+                }
+                if( $key -eq $Name ) {
+                    $thisKeyMatchedSomething = $true
+                    $curMatchKind = [JsonifyTypeConfigMatchKind]::Exact
+                }
+
+                if($thisKeyMatchedSomething) {
                     [JsonifyDefaultTypeConfig]@{
                         TypeName = $Key
                         TemplateName = $state[ $Key ]
+                        MatchKind = $curMatchKind
+                        ExactMatch = $matchKind -eq [JsonifyTypeConfigMatchKind]::Exact
                     }
                     # [pscustomobject]@{
                     #     PSTypeName = 'Jsonify.Config.DefaultTypeTemplate.Record'
@@ -253,7 +368,9 @@ function Get-JsonifyDefaultTypeTemplate {
             }
         # $state.Keys
     })
-    $query = $query | sort-Object -Unique TypeName, TemplateName
+    $query = $query
+        | sort-Object -Unique ExactMatch, TypeName, TemplateName
+
     if($KeysOnly) {
         return $query.TypeName
     }
@@ -261,6 +378,55 @@ function Get-JsonifyDefaultTypeTemplate {
 
 }
 
+
+function CoerceFrom.Datetime {
+    [OutputType('System.string')]
+    param(
+        [Parameter(mandatory, ValueFromPipeline)]
+        [object]$InputObject,
+
+         [ArgumentCompletions(
+            'Basic',
+            'o',
+            'YearMonthDay'
+        )]
+        [string]$TemplateName = 'o',
+
+        # [Microsoft.PowerShell.Commands.ValidateCultureNamesGenerator()]
+        [object]$CultureName
+        # [Alias('IgnoreProp', 'DropProperty', 'Drop')]
+        # [string[]]$ExcludeProperty = @()
+    )
+    begin {
+        # CoerceFrom.FileSystemInfo (gi .\readme.md)
+        if($CultureName) {
+            $CultInfo = Get-Culture $CultureName -ea 'ignore'
+        }
+    }
+    process {
+        $tinfo = ( $InputObject )?.GetType()
+        # WarnIf.NotType $InputObject -type 'DateTime'
+        WarnIf.NotType -In $InputObject -type 'DateTime', 'DateTimeOffset'
+        if($PSBoundParameters.ContainsKey('TemplateName')){
+            $whichTemplate = $TemplateName
+        } else {
+            $whichTemplate = __Get-FirstTemplateName -TypeName $Tinfo.Name
+        }
+
+        # $which = __Get-FirstTemplateName -TypeName 'Datetime' -UsingWildcard
+        switch( $whichTemplate ) {
+            'YearMonthDay' { $formatStr = 'yyyy-MM-dd' }
+            'Basic' { $formatStr = 'o' }
+            default { $formatStr = $which }
+        }
+        if( $CultureInfo ) {
+            return $InputObject.ToString( $formatStr, $CultureInfo )
+        } else {
+            return $InputObject.ToString( $formatStr )
+        }
+
+    }
+}
 
 function CoerceFrom.FileSystemInfo {
     [Alias('CoerceFrom.File')]
@@ -294,8 +460,6 @@ function CoerceFrom.FileSystemInfo {
             # 'Length'
             'VersionInfo'
         )
-
-
     )
     $Obj = $InputObject
     $tinfo = $InputObject.GetType()
@@ -410,6 +574,7 @@ function CoerceFrom.AnyType {
     # $longName = $tinfo.Namespace, $tinfo.Name -join '.' -replace '^System\.', ''
     # $fullName# [string]$TypeName = $InputObject.GetType().FullName
     # $shortName = $Tinfo.Name
+
     switch( $longName ) {
         'System.IO.FileSystemInfo' {
             $new = CoerceFrom.FileSystemInfo -InputObject $InputObject
@@ -456,7 +621,9 @@ function ConvertTo-Jsonify {
         core entry point for the proxy of ConvertTo-Json
     #>
     [Alias(
-        'AutoJsonify', 'Jsonify', 'aj.Json'
+        'Jsonify'
+        # 'AutoJsonify'
+        # 'Jsonify', 'aj.Json'
     )]
 
     [OutputType('Object', ParameterSetName='__AllParameterSets')]
@@ -551,6 +718,7 @@ function ConvertTo-Jsonify {
 Export-ModuleMember -Function @(
     'Get-Jsonify*'
     'Set-Jsonify*'
+    'ConvertTo-Jsonify'
     # 'Get-JsonifyDefaultTypeTemplate'
     # 'Get-JsonifyDefaultCoerceTemplate'
     'Set-JsonifyDefaultCoerceTemplate'
@@ -562,11 +730,14 @@ Export-ModuleMember -Function @(
     'aj.*'
     'Jsonify.*',
     'Json.*'
-
     if( $ModuleConfig.ExportCoercionFunctions ) {
         'CoerceFrom.*'
     }
+    if( $ModuleConfig.ExportDebugFunctions ) {
+        'WarnIf.NotType'
+    }
 ) -Alias @(
+    'Jsonify'
     'Get-Jsonify*'
     'Set-Jsonify*'
     'AutoJson.*'
@@ -579,13 +750,13 @@ Export-ModuleMember -Function @(
     }
 )
 
-
 # # no validation
 Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileSystemInfo' -TemplateName 'Minfiy'
 Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileSystemInfo' -TemplateName 'Minify'
 Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.DirectoryInfo' -TemplateName 'Minify'
 Set-JsonifyDefaultCoerceTemplate -TypeName 'IO.FileInfo' -TemplateName 'Minify'
 Set-JsonifyDefaultCoerceTemplate -TypeName 'DateTime' -TemplateName 'o'
+Set-JsonifyDefaultCoerceTemplate -TypeName 'DateTimeOffset' -TemplateName 'YearMonthDay'
 # Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileSystemInfo' -TemplateName 'Minify'
 # Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.DirectoryInfo' -TemplateName 'Minify'
 # Set-JsonifyDefaultCoerceTemplate -TypeName 'System.IO.FileInfo' -TemplateName 'Minify'
